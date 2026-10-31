@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Generated data and run outputs (re-create with `make run` / run.ps1)
+data/
+results/
+
+# Secrets: real values live in .env, which is never committed
+.env

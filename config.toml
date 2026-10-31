@@ -1,0 +1,18 @@
+# TradeSync configuration.
+
+[recon]
+# Relative price tolerance: a price break is raised only when
+#   |internal_price - custodian_price| > price_tolerance * internal_price
+# 0.0001 = 1 basis point. Kept as a STRING so it is parsed straight into an exact
+# Decimal; a TOML float would go through binary floating point first.
+price_tolerance = "0.0001"
+
+[data]
+dir = "data"
+internal_file = "internal_trades.csv"
+custodian_file = "custodian_trades.csv"
+ground_truth_file = "ground_truth.csv"
+
+[generator]
+seed = 42
+size = 100000

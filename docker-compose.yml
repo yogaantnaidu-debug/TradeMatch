@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: tradesync-postgres
+    environment:
+      # Values come from .env (see .env.example). The defaults are for local dev only.
+      POSTGRES_USER: ${POSTGRES_USER:-tradesync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradesync}
+      POSTGRES_DB: ${POSTGRES_DB:-tradesync}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # run.ps1 / Makefile wait on this so the pipeline never starts before the DB accepts connections.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tradesync} -d ${POSTGRES_DB:-tradesync}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:
