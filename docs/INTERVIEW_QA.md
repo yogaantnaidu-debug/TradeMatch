@@ -186,7 +186,7 @@ downside. That only works reliably because NUMERIC is exact.
 **39. What do Docker and CI do here?**
 `docker-compose.yml` runs Postgres 16 with a healthcheck and a named volume, with credentials from `.env`. The GitHub Actions workflow
 starts a Postgres 16 service container, installs the requirements, runs pytest with coverage, then runs a 10k end-to-end smoke test.
-*Honest:* I wrote both but couldn't run Docker on my build machine. The tests ran against native PG 16.2.
+The CI workflow passes on GitHub (33 tests, 85% coverage, 10k smoke run with F1 1.0). *Honest:* I couldn't run `docker compose` on my build machine, so locally the tests ran against native PG 16.2.
 
 **40. Python choices worth defending?**
 Python only orchestrates, and SQL does the work. `psycopg` 3 with `autocommit=True`, so each `with conn.transaction()` is a
@@ -210,7 +210,8 @@ Use this so your resume only claims what exists.
 - 33 pytest tests on real Postgres, 85% coverage
 
 **Written but NOT verified on the build machine**
-- Docker Compose setup, the Docker step of `run.ps1`, the Makefile (no `make` on Windows), the GitHub Actions workflow
+- Docker Compose setup, the Docker step of `run.ps1`, the Makefile (no `make` on Windows)
+- (The GitHub Actions workflow **is** verified: it passed on its first run on GitHub)
 - (`.\run.ps1 -NoDocker` against an already-running Postgres 16.2 **was** run end to end and exited 0)
 
 **NOT implemented (don't claim)**

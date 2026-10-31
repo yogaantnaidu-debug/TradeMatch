@@ -127,8 +127,11 @@ All numbers come from running this code once on the machine below (31 Oct 2026).
 **Machine:** AMD Ryzen 9 9950X3D (16 cores), 61.6 GB RAM, Windows 11 Pro, Python 3.11.9,
 PostgreSQL 16.2. *Honest note:* Docker was not installed on the machine used to build this, so
 Postgres 16.2 ran as native Windows binaries (from the `pgserver` pip package, used only as a
-local server and not a project dependency). Docker Compose and the GitHub Actions workflow
-are written but were **not executed** here. `.\run.ps1 -NoDocker` was run end to end. Timings on Docker will differ.
+local server and not a project dependency). `docker-compose.yml` was **not executed** here.
+`.\run.ps1 -NoDocker` was run end to end. Timings on Docker will differ.
+
+**CI (GitHub Actions, ubuntu-latest, `postgres:16` service container):** first run passed.
+33 tests passed in 2.28 s, 85% coverage, and the 10k smoke run found 550 of 550 seeded breaks with 0 FP and 0 FN.
 
 | Metric | Value |
 |---|---|

@@ -169,7 +169,7 @@ The DQ stage commits its results first. Then `dq_gate()` raises if any check fai
 **Idempotency approach.** Three parts: (1) natural keys plus unique constraints at every layer (`(batch_id, source_line)`, `(batch_id, trade_id)`, `(trade_id, break_type)`); (2) `ON CONFLICT DO NOTHING / DO UPDATE` on every write; (3) the SHA-256 of both files is stored per run, and the same `batch_id` with **different** content is refused instead of being silently skipped. The alternative, "delete the batch and reload", is simpler but loses the break history and leaves a window where data is missing.
 
 ## 5. Honest limitations
-- Docker Compose and the CI workflow were written but not run on the build machine (Docker was not installed there). The tests ran against native PostgreSQL 16.2.
+- `docker-compose.yml` was not run on the build machine (Docker was not installed there). Locally, the tests ran against native PostgreSQL 16.2. In GitHub Actions they pass against the `postgres:16` container.
 - The precision, recall and F1 scores of 1.0 are against synthetic data whose rules match the pipeline's rules. Real data would surface cases this generator does not create.
 - The clean stage is the slowest (about 4.5 s for 2 x 99,990 rows). Likely causes are `to_jsonb` on every row (it is only needed for rejects), regex checks and temp tables. This has not been profiled.
 - Breaks resolve by absence, which assumes full-snapshot batches processed in order. A partial file would wrongly resolve breaks.
