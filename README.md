@@ -43,7 +43,9 @@ Needs Docker Desktop and Python 3.11+.
 ```bash
 cp .env.example .env
 ```
-Edit `.env` and set a password, then run everything with one command.
+(on Windows: `copy .env.example .env`). Edit `.env` and set the same new password in both
+`POSTGRES_PASSWORD` and `DATABASE_URL`. Docker reads the first and Python reads the second.
+Then run everything with one command.
 
 Windows (PowerShell):
 ```bash

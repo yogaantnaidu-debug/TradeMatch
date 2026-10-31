@@ -38,5 +38,23 @@ def load_config(path: Path | str = ROOT / "config.toml") -> Config:
     )
 
 
+def read_env_file(path: Path = ROOT / ".env") -> dict[str, str]:
+    """Minimal KEY=VALUE reader, so the password set in .env for Docker also reaches Python.
+
+    Hand-written instead of python-dotenv to keep the dependency list unchanged.
+    """
+    values = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
 def database_url() -> str:
-    return os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+    # A real environment variable wins (CI, or a one-off override), then .env, then the dev default.
+    return (os.environ.get("DATABASE_URL")
+            or read_env_file().get("DATABASE_URL")
+            or DEFAULT_DATABASE_URL)
