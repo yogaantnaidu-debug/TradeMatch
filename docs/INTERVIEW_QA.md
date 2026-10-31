@@ -27,7 +27,7 @@ would show up as "missing" and my evaluation would be wrong. So corrupted rows a
 real rows (`generate_data.py: build_file`). The clean layer must reject the copy and keep the original.
 
 **5. How do you know it works?**
-Three ways. 40 pytest tests against real Postgres. Stored DQ checks on every run. `evaluate.py`
+Three ways. 44 pytest tests against real Postgres. Stored DQ checks on every run. `evaluate.py`
 compares against `ground_truth.csv` and gives 1.0 precision and recall per type.
 *Trap: "1.0 is suspicious."* Yes. The generator and the rules were written together, so 1.0 is
 expected. It works as a regression test, not as proof the rules suit real custodian data. The
@@ -177,7 +177,7 @@ secrets in Secrets Manager instead of `.env`. None of this is built.
 `tests/conftest.py` creates a fresh Postgres **schema** per test (via `search_path`) and drops it afterwards, so tests are isolated
 and don't touch real data. The suite covers tolerance boundaries (5 cases), each break type, 14 invalid-row cases (11 distinct reasons), dedup,
 idempotency, changed content, corrupt file, crash midway, the DQ gate, ageing and late-record resolution, and a 5k end-to-end run.
-40 tests (33 pipeline, 5 dashboard, 2 config), 85% coverage. *Trap: "why not mock the database?"* The logic lives in SQL, so a mock would test nothing.
+44 tests (33 pipeline, 5 dashboard, 4 real-prices, 2 config), 86% coverage. *Trap: "why not mock the database?"* The logic lives in SQL, so a mock would test nothing.
 
 **38. Why test exactly at the tolerance?**
 Off-by-one bugs live at boundaries (`>` vs `>=`). With 100.00 and 1bp: 100.010000 matches, 100.010001 breaks, and the same holds on the
@@ -193,6 +193,15 @@ Python only orchestrates, and SQL does the work. `psycopg` 3 with `autocommit=Tr
 real BEGIN/COMMIT (without it, psycopg opens an implicit transaction and nested blocks become savepoints). Bind parameters
 for values. Table names can't be bind parameters, so they come from hard-coded whitelists (no SQL injection).
 `Decimal` everywhere for money, `tomllib` from the standard library, and a dataclass for config.
+
+**Bonus: "Why didn't you use real data?"**
+No public dataset pairs a fund's internal trades with its custodian's: that data is confidential everywhere.
+And even if I had real files, nobody could tell me which breaks were true, so precision and recall could not be
+measured. So `generate_data.py --prices` takes a real daily-price dataset (Kaggle's US stock datasets work) for
+the tickers, trading days and prices, with each price inside that day's real low-high range, and then seeds the
+breaks on top. Real market shape, known ground truth. *Trap: "are those real ISINs?"* No. Real ISINs need licensed
+CUSIP data, so I build one from the ticker with a correct Luhn check digit (a test checks it against Apple's real
+ISIN, US0378331005). *Honest:* only Kaggle-style sample files were tested, not a full downloaded dataset.
 
 **Bonus: "Your brief said no frontend. Why is there a dashboard?"**
 It is a demo viewer, not part of the pipeline. About 200 lines of standard-library Python that only `SELECT` from
@@ -214,7 +223,8 @@ Use this so your resume only claims what exists.
 - 7 stored data-quality checks and a DQ gate
 - Indexes, plus measured EXPLAIN ANALYZE before/after on 100k rows
 - evaluate.py with precision, recall and F1 per type and overall
-- 40 pytest tests on real Postgres (33 pipeline + 5 dashboard + 2 config), 85% coverage
+- 44 pytest tests on real Postgres (33 pipeline + 5 dashboard + 4 real-prices + 2 config), 86% coverage
+- `--prices`: seeded trades built on a real daily-price file or folder (Kaggle layouts), ISIN check digit, tested on Kaggle-style sample files
 - A read-only demo dashboard (`dashboard.py`, stdlib `http.server`, local only) that displays the views. It is a viewer, not an API
 
 **Verified environments**
@@ -228,4 +238,4 @@ Use this so your resume only claims what exists.
 - An API, a real frontend app (React etc.), login on the dashboard, alerting, user roles
 - Real custodian formats (SWIFT MT5xx, FIX), FX, ISIN check digit, matching on side, currency or settlement date
 - Partitioning, retention, handling of crashed RUNNING runs, performance tuning of the clean stage
-- Any test on real market data. The precision and recall figures are on synthetic data only
+- A run on a full downloaded Kaggle dataset (only Kaggle-style sample files were tested). The precision and recall figures are on seeded breaks only

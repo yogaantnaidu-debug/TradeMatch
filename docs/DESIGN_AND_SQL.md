@@ -27,7 +27,7 @@ Assumptions I made (the brief left them open):
 - **Default batch id = as-of date**, default as-of = 2026-10-30, the generator's base date. This keeps runs reproducible.
 - **Duplicates keep the first copy in the file.** The others are rejected even if their values differ.
 - **Tolerance is relative:** break if `|internal - custodian| > tolerance x internal_price`, with tolerance `0.0001` = 1 basis point. Exactly at the tolerance is a match. Quantity has no tolerance.
-- **ISIN check** is shape only (2 letters, 9 alphanumerics, 1 digit). The check digit is not verified.
+- **ISIN check** is shape only (2 letters, 9 alphanumerics, 1 digit). The pipeline does not verify the check digit. (With `--prices`, the generator builds ISINs from tickers with a correct Luhn check digit; they are still synthetic, because real ISINs need licensed CUSIP data.)
 - **Only price and quantity are compared.** A mismatched side, currency or ISIN is not one of the 4 break types.
 
 ## 3. The main SQL, line by line
@@ -170,13 +170,13 @@ The DQ stage commits its results first. Then `dq_gate()` raises if any check fai
 
 ## 5. Honest limitations
 - Verified environments: Docker Desktop (`postgres:16`, PG 16.15), native PostgreSQL 16.2 on Windows, and GitHub Actions (`postgres:16`). The Makefile has not been run (there is no `make` on the Windows build machine). CI covers the same commands.
-- The precision, recall and F1 scores of 1.0 are against synthetic data whose rules match the pipeline's rules. Real data would surface cases this generator does not create.
+- The precision, recall and F1 scores of 1.0 are against seeded breaks whose rules match the pipeline's rules. `--prices` makes tickers, dates and prices real, but the breaks and dirty rows are still generated. No public dataset of internal vs custodian trades exists, and real data has no ground truth to score against.
 - The clean stage is the slowest (about 4.5 s for 2 x 99,990 rows). Likely causes are `to_jsonb` on every row (it is only needed for rejects), regex checks and temp tables. This has not been profiled.
 - Breaks resolve by absence, which assumes full-snapshot batches processed in order. A partial file would wrongly resolve breaks.
 - No ISIN check digit, no FX conversion, and no matching on side, currency or settlement date.
 - No partitioning, so tables grow forever. No retention policy.
 - No scheduler, no alerting, and no user authentication or roles beyond the DB login.
-- Coverage is 85%. The CLI `main()` functions and printing are not covered by tests.
+- Coverage is 86%. The CLI `main()` functions and printing are not covered by tests.
 - The demo dashboard (`dashboard.py`) is local-only and has no login. It opens a new DB connection per page view, which is fine for a demo but would need pooling under real traffic.
 
 ## 6. What I would build next

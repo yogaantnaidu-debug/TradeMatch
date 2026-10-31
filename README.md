@@ -69,6 +69,24 @@ Useful options:
 ```bash
 python generate_data.py --size 10000 --seed 1
 ```
+
+**Real market prices (optional).** No public dataset pairs internal and custodian trades: that
+data is confidential. But real *market* data can replace the random tickers, dates and prices.
+Download a daily-price dataset from Kaggle yourself, such as the "Huge Stock Market Dataset"
+(`aapl.us.txt` files) or the "Stock Market Dataset" (`AAPL.csv` files), then point the generator at it:
+```bash
+python generate_data.py --prices path/to/Stocks --tickers 500 --days 20
+```
+It reads any CSV/TXT with `Date`, `Low` and `High` columns: a folder of one file per ticker
+(ticker from the file name), or one file with a `Ticker`/`Symbol`/`Name` column. Each trade gets a
+real ticker, a real trading day, and a price inside that day's real low-high range. The ISIN is
+built from the ticker with a correct check digit (real ISINs need licensed CUSIP data). Prices
+under 1.00 are skipped so a seeded break can never round away. **Breaks are still seeded**: real
+data has no ground truth, so seeding is what keeps precision and recall measurable. Without
+`--prices`, the output is byte-identical to before.
+
+To switch datasets cleanly, wipe the database first (`docker compose down -v`). Each batch counts
+as a full snapshot, so loading a different dataset as a new batch would mark the old breaks RESOLVED.
 ```bash
 python -m tradesync.pipeline --as-of 2026-10-31 --batch-id 2026-10-31
 ```
@@ -77,7 +95,7 @@ python -m tradesync.pipeline --as-of 2026-10-31 --batch-id 2026-10-31
 ```
 config.toml              price tolerance, file paths, generator seed/size
 docker-compose.yml       PostgreSQL 16
-generate_data.py         synthetic files with seeded breaks + dirty rows + ground_truth.csv
+generate_data.py         seeded trade files (random or real market prices) + dirty rows + ground_truth.csv
 evaluate.py              detected breaks vs ground truth -> precision / recall / F1
 benchmark_explain.py     EXPLAIN ANALYZE before/after indexes
 dashboard.py             read-only demo web page over the recon tables (stdlib only)
@@ -153,8 +171,8 @@ Measured on two Postgres setups:
 | Re-run same batch (no new rows) | not measured | 5.55 s, table row counts unchanged |
 | Rejected rows | 1,980 (990 duplicates, 990 invalid), each with a reason | same |
 | Precision / recall / F1 | 1.0 / 1.0 / 1.0 for all 4 break types (5,500 TP, 0 FP, 0 FN) | same |
-| Tests | 40 passed in 8.9 s | 40 passed in 11.4 s |
-| Coverage (pytest-cov) | 85% overall: config/db 100%, load_raw 94%, generate_data 92%, dashboard 86%, evaluate 78%, pipeline 73% (untested lines are the CLI `main()` / printing code) | same |
+| Tests | 44 passed in 9.3 s (40 in 8.9 s before the real-prices tests) | 40 passed in 11.4 s (before the real-prices tests) |
+| Coverage (pytest-cov) | 86% overall: config/db 100%, load_raw 94%, generate_data 92%, dashboard 86%, evaluate 78%, pipeline 73% (untested lines are the CLI `main()` / printing code) | 85% (before the real-prices tests) |
 
 **EXPLAIN ANALYZE, before vs after `sql/indexes.sql`** (median of 5 runs, 99,000 clean rows per side,
 full plans written to `results/explain_analyze.txt` by `benchmark_explain.py`). Both setups chose the same plans:

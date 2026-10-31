@@ -5,11 +5,16 @@ finds exactly those (see evaluate.py). A fixed seed makes every run identical.
 
 Outputs (in data/):
   internal_trades.csv, custodian_trades.csv, ground_truth.csv
+
+Optional --prices: use REAL market data (e.g. a Kaggle daily-price dataset) for the
+tickers, trade dates and prices, instead of random ones. Breaks are still seeded by
+us, because real data has no ground truth to score against.
 """
 import argparse
 import csv
 import random
 import string
+from collections import deque
 from datetime import date, timedelta
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
@@ -49,7 +54,80 @@ def random_isin(rng: random.Random) -> str:
     return rng.choice(COUNTRIES) + body + str(rng.randint(0, 9))
 
 
-def make_trades(n: int, rng: random.Random, base_date: date) -> list[dict]:
+def isin_check_digit(body: str) -> str:
+    """Real ISIN check digit (Luhn) for the first 11 characters, e.g. US037833100 -> 5."""
+    digits = "".join(str(int(ch, 36)) for ch in body)  # A=10 ... Z=35, digits stay digits
+    total = 0
+    # Double every second digit starting from the RIGHTMOST one.
+    for pos, ch in enumerate(reversed(digits)):
+        d = int(ch) * (2 if pos % 2 == 0 else 1)
+        total += d // 10 + d % 10
+    return str((10 - total % 10) % 10)
+
+
+def isin_for_ticker(ticker: str) -> str:
+    """A valid-format US ISIN built from the ticker.
+
+    The datasets give tickers, not ISINs, and real ISINs need the CUSIP, which is
+    licensed data. So this ISIN is synthetic but deterministic (same ticker -> same
+    ISIN) and carries a correct check digit.
+    """
+    body = "US" + ticker.ljust(9, "0")
+    return body + isin_check_digit(body)
+
+
+PRICE_TICKER_COLUMNS = ("ticker", "symbol", "name")
+
+
+def _read_price_file(path: Path, days: int, out: dict[str, deque]) -> None:
+    """Add the last `days` valid rows per ticker from one CSV/TXT price file.
+
+    Handles the common Kaggle layouts: one file per ticker (aapl.us.txt, AAPL.csv,
+    ticker taken from the file name) or one file with a ticker/symbol/name column.
+    Needs Date, Low and High columns (any letter case).
+    """
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if not header:
+            return  # some Kaggle files are empty
+        cols = {h.strip().lower(): i for i, h in enumerate(header)}
+        if not {"date", "low", "high"} <= cols.keys():
+            return
+        tcol = next((cols[c] for c in PRICE_TICKER_COLUMNS if c in cols), None)
+        file_ticker = path.name.split(".")[0].upper()
+        for row in reader:
+            try:
+                ticker = (row[tcol].strip().upper() if tcol is not None else file_ticker)
+                day = date.fromisoformat(row[cols["date"]].strip()[:10])
+                low, high = Decimal(row[cols["low"]]), Decimal(row[cols["high"]])
+            except (IndexError, ValueError, ArithmeticError):
+                continue  # skip malformed rows rather than fail the whole load
+            # Only plain tickers that fit an ISIN body (drops BRK-A, BF.B, ...). Prices below 1.00
+            # are skipped: at 4 decimals a seeded price break could round away to nothing and
+            # the ground truth would be wrong (the random generator uses 1-500 for the same reason).
+            if not (ticker.isalnum() and len(ticker) <= 9 and Decimal(1) <= low <= high):
+                continue
+            out.setdefault(ticker, deque(maxlen=days)).append((day, low, high))
+
+
+def load_prices(path: Path, max_tickers: int, days: int, rng: random.Random) -> list[tuple]:
+    """Return (ticker, date, low, high) rows: the most recent `days` rows of up to `max_tickers` tickers."""
+    files = sorted(p for p in path.rglob("*") if p.suffix.lower() in (".csv", ".txt")) if path.is_dir() else [path]
+    by_ticker: dict[str, deque] = {}
+    for p in files:
+        _read_price_file(p, days, by_ticker)
+    if not by_ticker:
+        raise SystemExit(f"no usable price rows in {path} (need Date, Low, High columns)")
+    tickers = sorted(by_ticker)  # sorted first so the seeded sample is reproducible
+    if len(tickers) > max_tickers:
+        tickers = sorted(rng.sample(tickers, max_tickers))
+    return [(t, d, lo, hi) for t in tickers for d, lo, hi in by_ticker[t]]
+
+
+def make_trades(n: int, rng: random.Random, base_date: date, prices: list[tuple] | None = None) -> list[dict]:
+    if prices:
+        return make_trades_from_prices(n, rng, prices)
     isins = [random_isin(rng) for _ in range(2000)]
     trades = []
     for i in range(1, n + 1):
@@ -61,6 +139,26 @@ def make_trades(n: int, rng: random.Random, base_date: date) -> list[dict]:
             "price": f"{rng.uniform(1, 500):.4f}",
             "currency": rng.choice(CURRENCIES),
             "trade_date": (base_date - timedelta(days=rng.randint(0, 9))).isoformat(),
+            "counterparty": rng.choice(COUNTERPARTIES),
+        })
+    return trades
+
+
+def make_trades_from_prices(n: int, rng: random.Random, prices: list[tuple]) -> list[dict]:
+    """Trades on real tickers and dates, each priced inside that day's real low-high range."""
+    isins = {t: isin_for_ticker(t) for t in {p[0] for p in prices}}
+    trades = []
+    for i in range(1, n + 1):
+        ticker, day, low, high = rng.choice(prices)
+        price = (low + (high - low) * Decimal(str(rng.random()))).quantize(Decimal("0.0001"))
+        trades.append({
+            "trade_id": f"T{i:08d}",
+            "isin": isins[ticker],
+            "side": rng.choice(["BUY", "SELL"]),
+            "quantity": str(rng.randint(1, 100_000)),
+            "price": str(price),
+            "currency": "USD",          # US listings
+            "trade_date": day.isoformat(),
             "counterparty": rng.choice(COUNTERPARTIES),
         })
     return trades
@@ -128,9 +226,11 @@ def write_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
 
 
 def generate(size: int, seed: int, out_dir: Path, tolerance: Decimal,
-             base_date: date = date(2026, 10, 30)) -> dict:
+             base_date: date = date(2026, 10, 30), prices_path: Path | None = None,
+             max_tickers: int = 500, days: int = 20) -> dict:
     rng = random.Random(seed)
-    trades = make_trades(size, rng, base_date)
+    prices = load_prices(prices_path, max_tickers, days, rng) if prices_path else None
+    trades = make_trades(size, rng, base_date, prices)
 
     # Pick disjoint sets of trades for each seeded break type.
     ids = list(range(size))
@@ -170,18 +270,27 @@ def generate(size: int, seed: int, out_dir: Path, tolerance: Decimal,
     write_csv(out_dir / "internal_trades.csv", internal_rows, FIELDS)
     write_csv(out_dir / "custodian_trades.csv", custodian_rows, FIELDS)
     write_csv(out_dir / "ground_truth.csv", truth, ["trade_id", "break_type"])
-    return {"trades": size, "internal_rows": len(internal_rows),
-            "custodian_rows": len(custodian_rows), "seeded_breaks": len(truth)}
+    stats = {"trades": size, "internal_rows": len(internal_rows),
+             "custodian_rows": len(custodian_rows), "seeded_breaks": len(truth)}
+    if prices:
+        stats.update(price_source=str(prices_path), tickers=len({p[0] for p in prices}),
+                     price_rows=len(prices))
+    return stats
 
 
 def main() -> None:
     cfg = load_config()
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--size", type=int, default=cfg.size)
     ap.add_argument("--seed", type=int, default=cfg.seed)
     ap.add_argument("--out", type=Path, default=cfg.data_dir)
+    ap.add_argument("--prices", type=Path,
+                    help="real daily prices: a CSV/TXT file or a folder of them (Date, Low, High columns)")
+    ap.add_argument("--tickers", type=int, default=500, help="max tickers sampled from --prices")
+    ap.add_argument("--days", type=int, default=20, help="most recent trading days used per ticker")
     args = ap.parse_args()
-    stats = generate(args.size, args.seed, args.out, cfg.price_tolerance)
+    stats = generate(args.size, args.seed, args.out, cfg.price_tolerance,
+                     prices_path=args.prices, max_tickers=args.tickers, days=args.days)
     print(f"Generated {stats} in {args.out}")
 
 
