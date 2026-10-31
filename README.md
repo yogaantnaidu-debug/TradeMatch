@@ -54,7 +54,13 @@ Linux / macOS:
 make run
 ```
 Both scripts start Postgres in Docker, install the requirements, generate 100k trades, run the
-pipeline and print the evaluation. Other commands: `make test`, `make benchmark`, `make down`.
+pipeline and print the evaluation. Other commands: `make test`, `make benchmark`, `make dashboard`, `make down`.
+
+**Demo dashboard (read-only):** after a pipeline run, `python dashboard.py` and open http://127.0.0.1:8000.
+It shows the latest batch's match rate, breaks by type, break ageing, recent runs with stage timings,
+DQ results, rejection reasons, and a trade lookup across every layer. It is a thin viewer built on
+the standard library (`http.server`) with no business logic: every number is a `SELECT` on the
+views and tables above. Its DB session is set to read-only. In production this would be a BI tool.
 On Windows run them directly, for example `python -m pytest --cov=tradesync`.
 
 Useful options:
@@ -72,6 +78,7 @@ docker-compose.yml       PostgreSQL 16
 generate_data.py         synthetic files with seeded breaks + dirty rows + ground_truth.csv
 evaluate.py              detected breaks vs ground truth -> precision / recall / F1
 benchmark_explain.py     EXPLAIN ANALYZE before/after indexes
+dashboard.py             read-only demo web page over the recon tables (stdlib only)
 tradesync/
   pipeline.py            stage orchestration, transactions, pipeline_runs, DQ gate
   load_raw.py            COPY -> temp staging -> INSERT ... ON CONFLICT DO NOTHING
@@ -145,8 +152,8 @@ local server and not a project dependency). `docker-compose.yml` was **not execu
 | Re-run same batch (no new rows) | 5.55 s, table row counts unchanged |
 | Rejected rows | 1,980 (990 duplicates, 990 invalid), each with a reason |
 | Precision / recall / F1 | 1.0 / 1.0 / 1.0 for all 4 break types (5,500 TP, 0 FP, 0 FN) |
-| Tests | 33 passed in 9.8 s |
-| Coverage (pytest-cov) | 85% overall: config/db 100%, load_raw 94%, generate_data 92%, evaluate 78%, pipeline 73% (untested lines are the CLI `main()` / printing code) |
+| Tests | 38 passed in 12.1 s (33 pipeline + 5 dashboard) |
+| Coverage (pytest-cov) | 85% overall: config/db 100%, load_raw 94%, generate_data 92%, dashboard 86%, evaluate 78%, pipeline 73% (untested lines are the CLI `main()` / printing code) |
 
 **EXPLAIN ANALYZE, before vs after `sql/indexes.sql`** (median of 5 runs, 99,000 clean rows per side,
 full plans written to `results/explain_analyze.txt` by `benchmark_explain.py`):

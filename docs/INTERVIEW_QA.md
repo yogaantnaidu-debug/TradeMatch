@@ -177,7 +177,7 @@ secrets in Secrets Manager instead of `.env`. None of this is built.
 `tests/conftest.py` creates a fresh Postgres **schema** per test (via `search_path`) and drops it afterwards, so tests are isolated
 and don't touch real data. The suite covers tolerance boundaries (5 cases), each break type, 14 invalid-row cases (11 distinct reasons), dedup,
 idempotency, changed content, corrupt file, crash midway, the DQ gate, ageing and late-record resolution, and a 5k end-to-end run.
-33 tests, 85% coverage. *Trap: "why not mock the database?"* The logic lives in SQL, so a mock would test nothing.
+33 pipeline tests (plus 5 for the demo dashboard), 85% coverage. *Trap: "why not mock the database?"* The logic lives in SQL, so a mock would test nothing.
 
 **38. Why test exactly at the tolerance?**
 Off-by-one bugs live at boundaries (`>` vs `>=`). With 100.00 and 1bp: 100.010000 matches, 100.010001 breaks, and the same holds on the
@@ -194,6 +194,13 @@ real BEGIN/COMMIT (without it, psycopg opens an implicit transaction and nested 
 for values. Table names can't be bind parameters, so they come from hard-coded whitelists (no SQL injection).
 `Decimal` everywhere for money, `tomllib` from the standard library, and a dataclass for config.
 
+**Bonus: "Your brief said no frontend. Why is there a dashboard?"**
+It is a demo viewer, not part of the pipeline. About 200 lines of standard-library Python that only `SELECT` from
+`recon_summary`, `break_ageing`, `pipeline_runs`, `dq_results` and `rejected_records`. The logic stays in SQL. Safety: every
+value is HTML-escaped (raw files are untrusted, and there is a test with a `<script>` trade id), the trade lookup uses a bind
+parameter, the session sets `default_transaction_read_only = on`, and it binds to 127.0.0.1 only. *Trap: "would you ship this?"* No.
+In production the same views would feed Tableau or Power BI, behind company login.
+
 ## What is implemented vs NOT implemented
 Use this so your resume only claims what exists.
 
@@ -207,7 +214,8 @@ Use this so your resume only claims what exists.
 - 7 stored data-quality checks and a DQ gate
 - Indexes, plus measured EXPLAIN ANALYZE before/after on 100k rows
 - evaluate.py with precision, recall and F1 per type and overall
-- 33 pytest tests on real Postgres, 85% coverage
+- 38 pytest tests on real Postgres (33 pipeline + 5 dashboard), 85% coverage
+- A read-only demo dashboard (`dashboard.py`, stdlib `http.server`, local only) that displays the views. It is a viewer, not an API
 
 **Written but NOT verified on the build machine**
 - Docker Compose setup, the Docker step of `run.ps1`, the Makefile (no `make` on Windows)
@@ -216,7 +224,7 @@ Use this so your resume only claims what exists.
 
 **NOT implemented (don't claim)**
 - Kafka, Spark, Snowflake, Airflow, any cloud deployment
-- An API or UI, alerting, user roles
+- An API, a real frontend app (React etc.), login on the dashboard, alerting, user roles
 - Real custodian formats (SWIFT MT5xx, FIX), FX, ISIN check digit, matching on side, currency or settlement date
 - Partitioning, retention, handling of crashed RUNNING runs, performance tuning of the clean stage
 - Any test on real market data. The precision and recall figures are on synthetic data only

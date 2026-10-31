@@ -177,6 +177,7 @@ The DQ stage commits its results first. Then `dq_gate()` raises if any check fai
 - No partitioning, so tables grow forever. No retention policy.
 - No scheduler, no alerting, and no user authentication or roles beyond the DB login.
 - Coverage is 85%. The CLI `main()` functions and printing are not covered by tests.
+- The demo dashboard (`dashboard.py`) is local-only and has no login. It opens a new DB connection per page view, which is fine for a demo but would need pooling under real traffic.
 
 ## 6. What I would build next
 - **Airflow** (or Dagster): run daily, with one task per stage (the stages are already separate idempotent functions), retries, SLAs and alerts on FAILED runs or failed DQ checks.

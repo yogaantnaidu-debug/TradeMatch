@@ -29,7 +29,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Tests with coverage
-        run: python -m pytest --cov=tradesync --cov=generate_data --cov=evaluate --cov-report=term-missing
+        run: python -m pytest --cov=tradesync --cov=generate_data --cov=evaluate --cov=dashboard --cov-report=term-missing
       - name: End-to-end smoke run (10k trades)
         run: |
           python generate_data.py --size 10000

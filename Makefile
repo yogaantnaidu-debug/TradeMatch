@@ -1,7 +1,7 @@
 # Linux/macOS/CI entry point. On Windows use run.ps1.
 PY ?= python
 
-.PHONY: run db install data pipeline evaluate test benchmark down
+.PHONY: run db install data pipeline evaluate test benchmark dashboard down
 
 run: db install data pipeline evaluate
 
@@ -21,10 +21,13 @@ evaluate:
 	$(PY) evaluate.py
 
 test:
-	$(PY) -m pytest --cov=tradesync --cov=generate_data --cov=evaluate --cov-report=term-missing
+	$(PY) -m pytest --cov=tradesync --cov=generate_data --cov=evaluate --cov=dashboard --cov-report=term-missing
 
 benchmark:
 	$(PY) benchmark_explain.py
+
+dashboard:
+	$(PY) dashboard.py
 
 down:
 	docker compose down
