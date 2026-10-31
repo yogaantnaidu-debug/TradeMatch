@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # A real Postgres 16, same major version as docker-compose.yml, so tests hit real SQL.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tradesync
+          POSTGRES_PASSWORD: tradesync   # throwaway CI-only database, not a secret
+          POSTGRES_DB: tradesync
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tradesync"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      DATABASE_URL: postgresql://tradesync:tradesync@localhost:5432/tradesync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Tests with coverage
+        run: python -m pytest --cov=tradesync --cov=generate_data --cov=evaluate --cov-report=term-missing
+      - name: End-to-end smoke run (10k trades)
+        run: |
+          python generate_data.py --size 10000
+          python -m tradesync.pipeline
+          python evaluate.py
