@@ -29,6 +29,18 @@ def test_trade_lookup_and_escaping(conn, run):
     assert "<script>alert(1)" not in evil and "&lt;script&gt;" in evil
 
 
+def test_open_breaks_worklist_lists_filters_and_links(conn, run):
+    run([trade("T1", price="100"), trade("T2", quantity="100"), trade("T3")],
+        [trade("T1", price="150"), trade("T2", quantity="90"), trade("T4")])
+    html = dashboard.render_page(conn)
+    assert "Open breaks (worklist)" in html and "Showing 4 of 4 open breaks" in html
+    assert '<a href="/?trade_id=T1">T1</a>' in html          # each break links to its lookup
+    only_qty = dashboard.render_open_breaks(conn, "QUANTITY_MISMATCH")
+    assert "Showing 1 of 1" in only_qty and "T2" in only_qty and "T1" not in only_qty
+    # An unknown type is ignored (whitelist), never passed into SQL.
+    assert "Showing 4 of 4" in dashboard.render_open_breaks(conn, "x' OR 1=1 --")
+
+
 def test_read_only_session_refuses_writes(conn):
     # The handler sets this on every connection, so even a bug in the page cannot change data.
     conn.execute("SET default_transaction_read_only = on")

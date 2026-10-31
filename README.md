@@ -59,7 +59,8 @@ Both scripts start Postgres in Docker, install the requirements, generate 100k t
 pipeline and print the evaluation. Other commands: `make test`, `make benchmark`, `make dashboard`, `make down`.
 
 **Demo dashboard (read-only):** after a pipeline run, `python dashboard.py` and open http://127.0.0.1:8000.
-It shows the latest batch's match rate, breaks by type, break ageing, recent runs with stage timings,
+It shows the latest batch's match rate, breaks by type, break ageing, the open-breaks worklist (oldest first,
+filterable by break type, each trade linked to its lookup), recent runs with stage timings,
 DQ results, rejection reasons, and a trade lookup across every layer. It is a thin viewer built on
 the standard library (`http.server`) with no business logic: every number is a `SELECT` on the
 views and tables above. Its DB session is set to read-only. In production this would be a BI tool.
@@ -171,8 +172,8 @@ Measured on two Postgres setups:
 | Re-run same batch (no new rows) | not measured | 5.55 s, table row counts unchanged |
 | Rejected rows | 1,980 (990 duplicates, 990 invalid), each with a reason | same |
 | Precision / recall / F1 | 1.0 / 1.0 / 1.0 for all 4 break types (5,500 TP, 0 FP, 0 FN) | same |
-| Tests | 44 passed in 9.3 s (40 in 8.9 s before the real-prices tests) | 40 passed in 11.4 s (before the real-prices tests) |
-| Coverage (pytest-cov) | 86% overall: config/db 100%, load_raw 94%, generate_data 92%, dashboard 86%, evaluate 78%, pipeline 73% (untested lines are the CLI `main()` / printing code) | 85% (before the real-prices tests) |
+| Tests | 45 passed in 9.4 s (40 in 8.9 s before the real-prices and worklist tests) | 40 passed in 11.4 s (before the real-prices and worklist tests) |
+| Coverage (pytest-cov) | 87% overall: config/db 100%, load_raw 94%, generate_data 92%, dashboard 88%, evaluate 78%, pipeline 73% (untested lines are the CLI `main()` / printing code) | 85% (before the real-prices and worklist tests) |
 
 **EXPLAIN ANALYZE, before vs after `sql/indexes.sql`** (median of 5 runs, 99,000 clean rows per side,
 full plans written to `results/explain_analyze.txt` by `benchmark_explain.py`). Both setups chose the same plans:

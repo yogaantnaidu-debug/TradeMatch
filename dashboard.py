@@ -45,8 +45,10 @@ def tile(label: str, value) -> str:
     return f'<div class="tile"><div class="label">{esc(label)}</div><div class="value">{esc(value)}</div></div>'
 
 
-def section(title: str, inner: str) -> str:
-    return f"<section><h2>{esc(title)}</h2>{inner}</section>"
+def section(title: str, inner: str, anchor: str | None = None) -> str:
+    # anchor lets a form or link jump straight to this section (e.g. /#open-breaks).
+    attr = f' id="{esc(anchor)}"' if anchor else ""
+    return f"<section{attr}><h2>{esc(title)}</h2>{inner}</section>"
 
 
 def render_trade(conn, trade_id: str) -> str:
@@ -69,7 +71,46 @@ def render_trade(conn, trade_id: str) -> str:
     return section(f"Trade {trade_id}", "".join(parts))
 
 
-def render_page(conn, trade_id: str | None = None) -> str:
+OPEN_BREAKS_LIMIT = 50
+
+
+def render_open_breaks(conn, break_type: str | None) -> str:
+    """The operations worklist: open breaks, oldest first, optionally one break type.
+
+    break_type is only used if it is one of the four known types (whitelist), and
+    even then it travels as a bind parameter.
+    """
+    if break_type not in BREAK_TYPES:
+        break_type = None
+    where = "WHERE a.break_type = %(bt)s" if break_type else ""
+    total = fetch(conn, f"SELECT count(*) FROM break_ageing a {where}", {"bt": break_type})[1][0][0]
+    cols, rows = fetch(conn, f"""
+        SELECT a.trade_id, a.break_type, b.internal_value, b.custodian_value, b.difference,
+               a.first_detected_date, a.age_days, a.age_bucket
+        FROM break_ageing a JOIN breaks b ON b.break_id = a.break_id
+        {where}
+        ORDER BY a.age_days DESC, a.trade_id, a.break_type
+        LIMIT {OPEN_BREAKS_LIMIT}""", {"bt": break_type})
+
+    options = "".join(
+        f'<option value="{esc(t)}"{" selected" if t == break_type else ""}>{esc(t)}</option>'
+        for t in BREAK_TYPES)
+    form = (f'<form method="get" action="/#open-breaks"><select name="break_type">'
+            f'<option value="">All break types</option>{options}</select>'
+            f'<button>Filter</button></form>')
+    shown = f"Showing {len(rows):,} of {total:,} open breaks, oldest first."
+    if not rows:
+        return section("Open breaks (worklist)", form + '<p class="muted">No open breaks.</p>', "open-breaks")
+    head = "".join(f"<th>{esc(c)}</th>" for c in cols)
+    # The trade id links to the trade lookup, so a break can be followed to its source rows.
+    body = "".join(
+        f'<tr><td><a href="/?trade_id={esc(r[0])}">{esc(r[0])}</a></td>'
+        + "".join(f"<td>{esc(v)}</td>" for v in r[1:]) + "</tr>" for r in rows)
+    grid = f'<div class="scroll"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+    return section("Open breaks (worklist)", form + f'<p class="muted">{shown}</p>' + grid, "open-breaks")
+
+
+def render_page(conn, trade_id: str | None = None, break_type: str | None = None) -> str:
     if fetch(conn, "SELECT to_regclass('pipeline_runs')")[1][0][0] is None:
         return page('<p class="muted">No data yet. Run the pipeline first: '
                     "<code>python -m tradesync.pipeline</code></p>")
@@ -99,6 +140,8 @@ def render_page(conn, trade_id: str | None = None) -> str:
                count(*) FILTER (WHERE age_bucket = '6+')  AS "6+ days",
                count(*) AS total
         FROM break_ageing GROUP BY break_type ORDER BY break_type"""), "No open breaks.")))
+
+    out.append(render_open_breaks(conn, break_type))
 
     out.append(section("Recent pipeline runs", table(*fetch(conn, """
         SELECT run_id, batch_id, status, failed_stage, rows_in_internal AS raw_int,
@@ -153,8 +196,9 @@ table {{ border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums
 th, td {{ text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }}
 th {{ color:var(--muted); font-weight:500; font-size:12px; }}
 form {{ display:flex; gap:8px; flex-wrap:wrap; }}
-input {{ flex:1; min-width:180px; padding:8px 10px; border:1px solid var(--line); border-radius:6px;
+input, select {{ flex:1; min-width:180px; padding:8px 10px; border:1px solid var(--line); border-radius:6px;
         background:var(--bg); color:var(--text); }}
+a {{ color:var(--accent); }}
 button {{ padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; }}
 @media (max-width:600px) {{ .bar-row {{ grid-template-columns:1fr 60px; }} .bar-label {{ grid-column:1 / -1; }} }}
 </style></head><body><main>
@@ -168,12 +212,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path != "/":
             self.send_error(404)
             return
-        trade_id = (parse_qs(url.query).get("trade_id") or [""])[0].strip().upper() or None
+        query = parse_qs(url.query)
+        trade_id = (query.get("trade_id") or [""])[0].strip().upper() or None
+        break_type = (query.get("break_type") or [""])[0].strip().upper() or None
         try:
             with self.server.connect_fn() as conn:
                 # Belt and braces: the DB itself refuses writes from this connection.
                 conn.execute("SET default_transaction_read_only = on")
-                body, status = render_page(conn, trade_id), 200
+                body, status = render_page(conn, trade_id, break_type), 200
         except Exception as exc:  # show the error instead of a blank page during a demo
             body, status = page(f'<p class="muted">Database error: {esc(exc)}</p>'), 500
         data = body.encode("utf-8")

@@ -176,7 +176,7 @@ The DQ stage commits its results first. Then `dq_gate()` raises if any check fai
 - No ISIN check digit, no FX conversion, and no matching on side, currency or settlement date.
 - No partitioning, so tables grow forever. No retention policy.
 - No scheduler, no alerting, and no user authentication or roles beyond the DB login.
-- Coverage is 86%. The CLI `main()` functions and printing are not covered by tests.
+- Coverage is 87%. The CLI `main()` functions and printing are not covered by tests.
 - The demo dashboard (`dashboard.py`) is local-only and has no login. It opens a new DB connection per page view, which is fine for a demo but would need pooling under real traffic.
 
 ## 6. What I would build next

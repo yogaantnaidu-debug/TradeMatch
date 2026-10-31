@@ -27,7 +27,7 @@ would show up as "missing" and my evaluation would be wrong. So corrupted rows a
 real rows (`generate_data.py: build_file`). The clean layer must reject the copy and keep the original.
 
 **5. How do you know it works?**
-Three ways. 44 pytest tests against real Postgres. Stored DQ checks on every run. `evaluate.py`
+Three ways. 45 pytest tests against real Postgres. Stored DQ checks on every run. `evaluate.py`
 compares against `ground_truth.csv` and gives 1.0 precision and recall per type.
 *Trap: "1.0 is suspicious."* Yes. The generator and the rules were written together, so 1.0 is
 expected. It works as a regression test, not as proof the rules suit real custodian data. The
@@ -177,7 +177,7 @@ secrets in Secrets Manager instead of `.env`. None of this is built.
 `tests/conftest.py` creates a fresh Postgres **schema** per test (via `search_path`) and drops it afterwards, so tests are isolated
 and don't touch real data. The suite covers tolerance boundaries (5 cases), each break type, 14 invalid-row cases (11 distinct reasons), dedup,
 idempotency, changed content, corrupt file, crash midway, the DQ gate, ageing and late-record resolution, and a 5k end-to-end run.
-44 tests (33 pipeline, 5 dashboard, 4 real-prices, 2 config), 86% coverage. *Trap: "why not mock the database?"* The logic lives in SQL, so a mock would test nothing.
+45 tests (33 pipeline, 6 dashboard, 4 real-prices, 2 config), 87% coverage. *Trap: "why not mock the database?"* The logic lives in SQL, so a mock would test nothing.
 
 **38. Why test exactly at the tolerance?**
 Off-by-one bugs live at boundaries (`>` vs `>=`). With 100.00 and 1bp: 100.010000 matches, 100.010001 breaks, and the same holds on the
@@ -223,7 +223,7 @@ Use this so your resume only claims what exists.
 - 7 stored data-quality checks and a DQ gate
 - Indexes, plus measured EXPLAIN ANALYZE before/after on 100k rows
 - evaluate.py with precision, recall and F1 per type and overall
-- 44 pytest tests on real Postgres (33 pipeline + 5 dashboard + 4 real-prices + 2 config), 86% coverage
+- 45 pytest tests on real Postgres (33 pipeline + 6 dashboard + 4 real-prices + 2 config), 87% coverage
 - `--prices`: seeded trades built on a real daily-price file or folder (Kaggle layouts), ISIN check digit, tested on Kaggle-style sample files
 - A read-only demo dashboard (`dashboard.py`, stdlib `http.server`, local only) that displays the views. It is a viewer, not an API
 
