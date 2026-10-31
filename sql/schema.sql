@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS match_results (
     trade_id    text NOT NULL,
     status      text NOT NULL CHECK (status IN ('MATCHED', 'BREAK')),
     break_count int  NOT NULL DEFAULT 0,
+    break_types text[] NOT NULL DEFAULT '{}',   -- kept per batch so recon_summary history never changes
     as_of_date  date NOT NULL,
     PRIMARY KEY (batch_id, trade_id)
 );

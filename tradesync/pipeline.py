@@ -37,6 +37,7 @@ def apply_schema(conn: psycopg.Connection) -> None:
     with conn.transaction():
         run_sql_file(conn, "schema.sql")
         run_sql_file(conn, "indexes.sql")
+        run_sql_file(conn, "views.sql")
 
 
 def check_same_content(conn, batch_id: str, internal_sha: str, custodian_sha: str) -> None:
@@ -65,9 +66,53 @@ def load_stage(conn, ctx: dict) -> dict:
     }
 
 
+def clean_stage(conn, ctx: dict) -> dict:
+    params = {"batch_id": ctx["batch_id"]}
+    for source, raw, clean in (("INTERNAL", "raw_internal", "clean_internal"),
+                               ("CUSTODIAN", "raw_custodian", "clean_custodian")):
+        run_sql_file(conn, "clean.sql", params, {
+            "__RAW_TABLE__": raw, "__CLEAN_TABLE__": clean, "__SOURCE__": source})
+    b = ctx["batch_id"]
+    return {
+        "rows_clean_internal": scalar(conn, "SELECT count(*) FROM clean_internal WHERE batch_id = %s", (b,)),
+        "rows_clean_custodian": scalar(conn, "SELECT count(*) FROM clean_custodian WHERE batch_id = %s", (b,)),
+        "rows_rejected": scalar(conn, "SELECT count(*) FROM rejected_records WHERE batch_id = %s", (b,)),
+    }
+
+
+def recon_stage(conn, ctx: dict) -> dict:
+    run_sql_file(conn, "recon.sql", {"batch_id": ctx["batch_id"], "as_of": ctx["as_of"],
+                                     "tolerance": ctx["cfg"].price_tolerance})
+    b = ctx["batch_id"]
+    q = "SELECT count(*) FROM match_results WHERE batch_id = %s AND status = %s"
+    return {"matched": scalar(conn, q, (b, "MATCHED")), "broken": scalar(conn, q, (b, "BREAK"))}
+
+
+def dq_stage(conn, ctx: dict) -> dict:
+    run_sql_file(conn, "dq.sql", {"run_id": ctx["run_id"], "batch_id": ctx["batch_id"]})
+    return {}
+
+
 STAGES = [
     ("load_raw", load_stage),
+    ("clean", clean_stage),
+    ("recon", recon_stage),
+    ("data_quality", dq_stage),
 ]
+
+
+def dq_gate(conn, run_id: int) -> None:
+    """Fail the run if any data-quality check failed.
+
+    This runs AFTER the dq stage commits, so the failed check results stay stored
+    and can be inspected; the run itself is marked FAILED.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT check_name, observed, expected FROM dq_results "
+                    "WHERE run_id = %s AND NOT passed", (run_id,))
+        failed = cur.fetchall()
+    if failed:
+        raise PipelineError(f"data quality checks failed: {failed}")
 
 
 def run_pipeline(conn: psycopg.Connection, batch_id: str, as_of: date,
@@ -98,6 +143,8 @@ def run_pipeline(conn: psycopg.Connection, batch_id: str, as_of: date,
                 counts = fn(conn, ctx)
             timings[stage] = round((time.perf_counter() - t0) * 1000)
             update_run(conn, run_id, counts, timings)
+        stage = "dq_gate"
+        dq_gate(conn, run_id)
     except Exception as exc:
         # The failed stage's transaction has already been rolled back by the `with` block.
         with conn.transaction():
@@ -150,13 +197,37 @@ def main() -> None:
         print_run(conn, run_id)
 
 
-def print_run(conn, run_id: int) -> None:
+def print_query(conn, title: str, query: str, params=None) -> None:
     with conn.cursor() as cur:
-        cur.execute("SELECT * FROM pipeline_runs WHERE run_id = %s", (run_id,))
-        row = cur.fetchone()
-        for col, val in zip([d.name for d in cur.description], row):
-            if val is not None and col not in ("internal_file_sha256", "custodian_file_sha256"):
-                print(f"  {col:22} {val}")
+        cur.execute(query, params)
+        cols = [d.name for d in cur.description]
+        rows = cur.fetchall()
+    print(f"\n{title}")
+    widths = [max(len(str(c)), *(len(str(r[i])) for r in rows)) if rows else len(c)
+              for i, c in enumerate(cols)]
+    print("  " + "  ".join(c.ljust(w) for c, w in zip(cols, widths)))
+    for r in rows:
+        print("  " + "  ".join(str(v).ljust(w) for v, w in zip(r, widths)))
+
+
+def print_run(conn, run_id: int) -> None:
+    print_query(conn, "Pipeline run",
+                "SELECT run_id, batch_id, status, rows_in_internal AS raw_int, rows_in_custodian AS raw_cust, "
+                "rows_clean_internal AS clean_int, rows_clean_custodian AS clean_cust, rows_rejected AS rejected, "
+                "matched, broken, stage_timings_ms FROM pipeline_runs WHERE run_id = %s", (run_id,))
+    print_query(conn, "Recon summary",
+                "SELECT s.* FROM recon_summary s JOIN pipeline_runs r ON r.batch_id = s.batch_id "
+                "WHERE r.run_id = %s", (run_id,))
+    print_query(conn, "Open break ageing",
+                "SELECT age_bucket, break_type, count(*) AS open_breaks FROM break_ageing "
+                "GROUP BY 1, 2 ORDER BY 1, 2")
+    print_query(conn, "Rejected rows by reason",
+                "SELECT source, reason, count(*) AS rows FROM rejected_records r "
+                "JOIN pipeline_runs p ON p.batch_id = r.batch_id WHERE p.run_id = %s "
+                "GROUP BY 1, 2 ORDER BY 1, 2", (run_id,))
+    print_query(conn, "Data quality",
+                "SELECT check_name, passed, observed, expected FROM dq_results WHERE run_id = %s "
+                "ORDER BY check_name", (run_id,))
 
 
 if __name__ == "__main__":
