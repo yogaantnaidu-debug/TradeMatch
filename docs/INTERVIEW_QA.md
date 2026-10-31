@@ -8,7 +8,7 @@ Two files describe the same trades: our internal book and the custodian's. I loa
 PostgreSQL with COPY as raw text, clean and validate them in SQL (bad rows go to
 `rejected_records` with a reason), match them with a FULL OUTER JOIN, and record four break types
 with their age. Every stage is a transaction, re-runs are idempotent, data-quality checks are stored,
-and each run is logged. On 100k trades the whole pipeline took 6.75 s, and it found all 5,500
+and each run is logged. On 100k trades the whole pipeline took 4.97 s in Docker, and it found all 5,500
 seeded breaks with no false positives.
 
 **2. Why does reconciliation matter at a firm like Apollo?**
@@ -27,7 +27,7 @@ would show up as "missing" and my evaluation would be wrong. So corrupted rows a
 real rows (`generate_data.py: build_file`). The clean layer must reject the copy and keep the original.
 
 **5. How do you know it works?**
-Three ways. 33 pytest tests against real Postgres. Stored DQ checks on every run. `evaluate.py`
+Three ways. 40 pytest tests against real Postgres. Stored DQ checks on every run. `evaluate.py`
 compares against `ground_truth.csv` and gives 1.0 precision and recall per type.
 *Trap: "1.0 is suspicious."* Yes. The generator and the rules were written together, so 1.0 is
 expected. It works as a regression test, not as proof the rules suit real custodian data. The
@@ -177,7 +177,7 @@ secrets in Secrets Manager instead of `.env`. None of this is built.
 `tests/conftest.py` creates a fresh Postgres **schema** per test (via `search_path`) and drops it afterwards, so tests are isolated
 and don't touch real data. The suite covers tolerance boundaries (5 cases), each break type, 14 invalid-row cases (11 distinct reasons), dedup,
 idempotency, changed content, corrupt file, crash midway, the DQ gate, ageing and late-record resolution, and a 5k end-to-end run.
-33 pipeline tests (plus 5 for the demo dashboard), 85% coverage. *Trap: "why not mock the database?"* The logic lives in SQL, so a mock would test nothing.
+40 tests (33 pipeline, 5 dashboard, 2 config), 85% coverage. *Trap: "why not mock the database?"* The logic lives in SQL, so a mock would test nothing.
 
 **38. Why test exactly at the tolerance?**
 Off-by-one bugs live at boundaries (`>` vs `>=`). With 100.00 and 1bp: 100.010000 matches, 100.010001 breaks, and the same holds on the
@@ -186,7 +186,7 @@ downside. That only works reliably because NUMERIC is exact.
 **39. What do Docker and CI do here?**
 `docker-compose.yml` runs Postgres 16 with a healthcheck and a named volume, with credentials from `.env`. The GitHub Actions workflow
 starts a Postgres 16 service container, installs the requirements, runs pytest with coverage, then runs a 10k end-to-end smoke test.
-The CI workflow passes on GitHub (33 tests, 85% coverage, 10k smoke run with F1 1.0). *Honest:* I couldn't run `docker compose` on my build machine, so locally the tests ran against native PG 16.2.
+Both are verified. `.\run.ps1` with Docker Desktop ran the 100k pipeline in 4.97 s, and all 40 tests passed against the container. The CI workflow passes on GitHub (10k smoke run with F1 1.0). Before Docker was installed I also ran it on native Windows PG 16.2. The big join was about 3x faster in the container (23 ms vs 69 ms). I haven't investigated why, so I'd say exactly that if asked.
 
 **40. Python choices worth defending?**
 Python only orchestrates, and SQL does the work. `psycopg` 3 with `autocommit=True`, so each `with conn.transaction()` is a
@@ -214,13 +214,14 @@ Use this so your resume only claims what exists.
 - 7 stored data-quality checks and a DQ gate
 - Indexes, plus measured EXPLAIN ANALYZE before/after on 100k rows
 - evaluate.py with precision, recall and F1 per type and overall
-- 38 pytest tests on real Postgres (33 pipeline + 5 dashboard), 85% coverage
+- 40 pytest tests on real Postgres (33 pipeline + 5 dashboard + 2 config), 85% coverage
 - A read-only demo dashboard (`dashboard.py`, stdlib `http.server`, local only) that displays the views. It is a viewer, not an API
 
-**Written but NOT verified on the build machine**
-- Docker Compose setup, the Docker step of `run.ps1`, the Makefile (no `make` on Windows)
-- (The GitHub Actions workflow **is** verified: it passed on its first run on GitHub)
-- (`.\run.ps1 -NoDocker` against an already-running Postgres 16.2 **was** run end to end and exited 0)
+**Verified environments**
+- Docker Compose plus `.\run.ps1` on Docker Desktop (PG 16.15), the GitHub Actions workflow, and `.\run.ps1 -NoDocker` on native PG 16.2
+
+**Written but NOT verified**
+- The Makefile (no `make` on the Windows build machine; CI runs the same commands directly)
 
 **NOT implemented (don't claim)**
 - Kafka, Spark, Snowflake, Airflow, any cloud deployment

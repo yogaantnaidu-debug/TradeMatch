@@ -131,41 +131,43 @@ OVERALL                  5500     0     0     1.0000   1.0000  1.0000
 ```
 
 ## Measured results
-All numbers come from running this code once on the machine below (31 Oct 2026). Nothing is estimated.
+All numbers come from running this code on the machine below (31 Oct 2026). Nothing is estimated.
 
-**Machine:** AMD Ryzen 9 9950X3D (16 cores), 61.6 GB RAM, Windows 11 Pro, Python 3.11.9,
-PostgreSQL 16.2. *Honest note:* Docker was not installed on the machine used to build this, so
-Postgres 16.2 ran as native Windows binaries (from the `pgserver` pip package, used only as a
-local server and not a project dependency). `docker-compose.yml` was **not executed** here.
-`.\run.ps1 -NoDocker` was run end to end. Timings on Docker will differ.
+**Machine:** AMD Ryzen 9 9950X3D (16 cores), 61.6 GB RAM, Windows 11 Pro, Python 3.11.9.
+Measured on two Postgres setups:
+- **Docker** (the official path): `.\run.ps1` with Docker Desktop (WSL 2), image `postgres:16` = PostgreSQL 16.15. Verified end to end.
+- **Native**: PostgreSQL 16.2 Windows binaries from the `pgserver` pip package, used only as a local server before Docker was installed. Not a project dependency. Run with `.\run.ps1 -NoDocker`.
 
-**CI (GitHub Actions, ubuntu-latest, `postgres:16` service container):** first run passed.
-33 tests passed in 2.28 s, 85% coverage, and the 10k smoke run found 550 of 550 seeded breaks with 0 FP and 0 FN.
+**CI (GitHub Actions, ubuntu-latest, `postgres:16` service container):** passing. On the latest commit,
+38 tests passed in 3.0 s, and the 10k smoke run found 550 of 550 seeded breaks with 0 FP and 0 FN.
 
-| Metric | Value |
-|---|---|
-| Dataset | 100,000 trades; 99,990 rows per file (~6.7 MB each); 5,500 seeded breaks; per file 495 duplicate + 495 corrupted rows to reject, plus a 3% rate of cosmetic dirt (lowercase, spaces) to fix |
-| Generate data | 0.83 s |
-| Load raw (COPY, both files) | 1,111 ms (fresh database) |
-| Clean (validate + dedup, both sides) | 4,455 ms |
-| Recon (join + breaks + upserts) | 985 ms |
-| Data-quality checks | 116 ms |
-| Whole pipeline, fresh DB | 6.75 s |
-| Re-run same batch (no new rows) | 5.55 s, table row counts unchanged |
-| Rejected rows | 1,980 (990 duplicates, 990 invalid), each with a reason |
-| Precision / recall / F1 | 1.0 / 1.0 / 1.0 for all 4 break types (5,500 TP, 0 FP, 0 FN) |
-| Tests | 38 passed in 12.1 s (33 pipeline + 5 dashboard) |
-| Coverage (pytest-cov) | 85% overall: config/db 100%, load_raw 94%, generate_data 92%, dashboard 86%, evaluate 78%, pipeline 73% (untested lines are the CLI `main()` / printing code) |
+| Metric | Docker (PG 16.15) | Native (PG 16.2) |
+|---|---|---|
+| Dataset | 100,000 trades; 99,990 rows per file (~6.7 MB each); 5,500 seeded breaks; per file 495 duplicate + 495 corrupted rows to reject, plus a 3% rate of cosmetic dirt (lowercase, spaces) to fix | same |
+| Generate data | not timed separately | 0.83 s |
+| Load raw (COPY, both files) | 757 ms | 1,111 ms |
+| Clean (validate + dedup, both sides) | 3,325 ms | 4,455 ms |
+| Recon (join + breaks + upserts) | 640 ms | 985 ms |
+| Data-quality checks | 117 ms | 116 ms |
+| Whole pipeline, fresh DB | 4.97 s | 6.75 s |
+| Re-run same batch (no new rows) | not measured | 5.55 s, table row counts unchanged |
+| Rejected rows | 1,980 (990 duplicates, 990 invalid), each with a reason | same |
+| Precision / recall / F1 | 1.0 / 1.0 / 1.0 for all 4 break types (5,500 TP, 0 FP, 0 FN) | same |
+| Tests | 40 passed in 8.9 s | 40 passed in 11.4 s |
+| Coverage (pytest-cov) | 85% overall: config/db 100%, load_raw 94%, generate_data 92%, dashboard 86%, evaluate 78%, pipeline 73% (untested lines are the CLI `main()` / printing code) | same |
 
 **EXPLAIN ANALYZE, before vs after `sql/indexes.sql`** (median of 5 runs, 99,000 clean rows per side,
-full plans written to `results/explain_analyze.txt` by `benchmark_explain.py`):
+full plans written to `results/explain_analyze.txt` by `benchmark_explain.py`). Both setups chose the same plans:
 
-| Query | Before | After | Plan change |
-|---|---|---|---|
-| Find one trade by `trade_id` | 3.314 ms | 0.015 ms | Seq Scan -> Index Scan |
-| Trades that broke in a batch (`batch_id, status`) | 4.409 ms | 0.696 ms | Seq Scan -> Bitmap Index Scan |
-| Open breaks by type (`breaks.status`) | 0.625 ms | 0.681 ms | none: still Seq Scan |
-| Recon FULL OUTER JOIN | 68.883 ms | 69.949 ms | none: Parallel Hash Full Join both times |
+| Query | Docker before | Docker after | Native before | Native after | Plan change |
+|---|---|---|---|---|---|
+| Find one trade by `trade_id` | 2.889 ms | 0.016 ms | 3.314 ms | 0.015 ms | Seq Scan -> Index Scan |
+| Trades that broke in a batch (`batch_id, status`) | 4.039 ms | 0.796 ms | 4.409 ms | 0.696 ms | Seq Scan -> Bitmap Index Scan |
+| Open breaks by type (`breaks.status`) | 0.662 ms | 0.657 ms | 0.625 ms | 0.681 ms | none: still Seq Scan |
+| Recon FULL OUTER JOIN | 23.444 ms | 23.278 ms | 68.883 ms | 69.949 ms | none: Parallel Hash Full Join both times |
+
+The join ran about 3x faster in the Linux container than on native Windows Postgres. The cause
+was not investigated. Likely factors are the different build and OS, and memory settings.
 
 What this shows: indexes help **selective** lookups. They do not help the status filter on `breaks`,
 because all 5,500 rows are `OPEN` after one batch, so reading everything is cheaper. They also do
